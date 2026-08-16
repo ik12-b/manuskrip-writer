@@ -1,0 +1,171 @@
+name: Android Build
+
+# Proyek ini tidak menyertakan Gradle Wrapper (gradlew), jadi workflow ini
+# memakai gradle/actions/setup-gradle untuk memasang Gradle langsung —
+# versinya dikunci ke 9.1.0 karena Android Gradle Plugin 9.1.1 (lihat
+# gradle/libs.versions.toml) mensyaratkan minimum Gradle 9.1.0 + JDK 17.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+# Batalkan run lama kalau ada push baru ke branch/PR yang sama
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_VERSION: "9.1.0"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Build debug APK + unit test + lint. Selalu jalan, tidak butuh secret
+  # apapun (pakai debug.keystore yang sudah di-commit di repo, dan
+  # GEMINI_API_KEY fallback ke placeholder di .env.example).
+  # ---------------------------------------------------------------------
+  build-debug:
+    name: Build Debug APK & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Lint (debug)
+        run: gradle lintDebug --stacktrace
+
+      - name: Unit test (debug)
+        run: gradle testDebugUnitTest --stacktrace
+
+      - name: Assemble debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: manuscribe-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ---------------------------------------------------------------------
+  # Build & tanda tangani APK + AAB release. Hanya jalan di push ke
+  # main/master, dan hanya kalau secret keystore sudah diisi di
+  # Settings → Secrets and variables → Actions repo ini:
+  #   RELEASE_KEYSTORE_BASE64  (hasil: base64 -w0 my-upload-key.jks)
+  #   RELEASE_STORE_PASSWORD
+  #   RELEASE_KEY_PASSWORD
+  #   GEMINI_API_KEY           (opsional — kalau kosong, HTR fallback ke
+  #                              draf lokal seperti dijelaskan di HtrService.kt)
+  # Kalau secret belum diisi, job ini otomatis dilewati (bukan gagal),
+  # supaya build-debug tetap bisa dipakai tanpa perlu setup signing dulu.
+  # ---------------------------------------------------------------------
+  build-release:
+    name: Build Signed Release APK/AAB
+    runs-on: ubuntu-latest
+    needs: build-debug
+    if: |
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      secrets.RELEASE_KEYSTORE_BASE64 != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "::error::Secret RELEASE_KEYSTORE_BASE64 belum diisi. Lihat komentar di bagian atas file workflow ini." 
+            exit 1
+          fi
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "${{ github.workspace }}/my-upload-key.jks"
+
+      - name: Tulis .env untuk secrets-gradle-plugin
+        # secrets-gradle-plugin membaca dari FILE .env, bukan dari environment
+        # variable — jadi GEMINI_API_KEY (kalau ada) ditulis ke file di sini.
+        # Kalau secret GEMINI_API_KEY belum diisi, langkah ini dilewati dan
+        # build otomatis jatuh ke .env.example (placeholder) seperti biasa.
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "GEMINI_API_KEY=$GEMINI_API_KEY" > "${{ github.workspace }}/.env"
+          fi
+
+      - name: Assemble & bundle release
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: gradle assembleRelease bundleRelease --stacktrace
+
+      - name: Hapus keystore & .env hasil decode
+        if: always()
+        run: rm -f "${{ github.workspace }}/my-upload-key.jks" "${{ github.workspace }}/.env"
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: manuscribe-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload release AAB (Play Store)
+        uses: actions/upload-artifact@v4
+        with:
+          name: manuscribe-release-aab
+          path: app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 30

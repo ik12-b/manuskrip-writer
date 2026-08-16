@@ -1,0 +1,7 @@
+{
+  "name": "ManuScribe Arab",
+  "description": "High-performance Arabic historical manuscript transcription and HTR engine with adaptive split-view layout and paleography support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

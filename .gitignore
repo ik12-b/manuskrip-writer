@@ -1,0 +1,27 @@
+*.iml
+.gradle
+.kotlin
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.env
+*.jks
+*.keystore
+!debug.keystore
+# debug.keystore SENGAJA TIDAK di-gitignore: signingConfigs.debugConfig di
+# app/build.gradle.kts menunjuk ke file project-local ini (bukan default
+# ~/.android/debug.keystore), supaya build debug reproducible untuk semua
+# kontributor & CI. Ini bukan rahasia — kunci debug standar Android
+# (password "android", alias "androiddebugkey"), memang lazim di-commit.
+# my-upload-key.jks (kunci rilis) TETAP diabaikan lewat pola *.jks di atas —
+# jangan pernah commit kunci rilis sungguhan ke repo.
