@@ -359,6 +359,7 @@ fun ManuScribeApp(
                     }
                 }
             }
+            }
         }
 
         // Dialogs
