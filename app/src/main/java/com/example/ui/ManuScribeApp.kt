@@ -31,12 +31,16 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.VerticalAlignBottom
 import androidx.compose.material.icons.filled.VerticalAlignCenter
 import androidx.compose.material.icons.filled.VerticalAlignTop
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -48,6 +52,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import android.net.Uri
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -109,13 +116,19 @@ fun ManuScribeApp(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Photo Picker untuk melampirkan foto asli folio manuskrip
+    // Photo Picker untuk melampirkan foto asli folio manuskrip (folio yang sudah ada)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let { viewModel.attachFolioImage(it) } }
     val onAttachPhoto: () -> Unit = {
         photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
+
+    // Photo Picker khusus dialog "Tambah Naskah" (dokumen baru dari foto)
+    var newDocImageUri by remember { mutableStateOf<Uri?>(null) }
+    val newDocPhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri -> uri?.let { newDocImageUri = it } }
 
     // Split View Preset State: 0.50f (50/50), 0.65f (Focus Top Manuscript), 0.35f (Focus Bottom Typewriter)
     var splitRatio by remember { mutableFloatStateOf(0.48f) }
@@ -169,10 +182,14 @@ fun ManuScribeApp(
             )
 
             // Responsive Split-View Container (Portrait vs Landscape/Tablet)
-            BoxWithConstraints(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
+            ) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
             ) {
                 val isWideScreen = maxWidth > 600.dp && maxWidth > maxHeight
 
@@ -298,6 +315,50 @@ fun ManuScribeApp(
                     }
                 }
             }
+
+            // Empty state — belum ada manuskrip sama sekali (database kosong,
+            // tidak lagi diisi data contoh otomatis). Overlay di atas viewer
+            // kosong, mengarahkan pengguna langsung ke alur unggah foto.
+            if (selectedDocument == null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(ObsidianBg)
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddPhotoAlternate,
+                        contentDescription = null,
+                        tint = GoldAmber,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Belum Ada Manuskrip",
+                        style = MaterialTheme.typography.titleLarge.copy(color = TextPrimary)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Tambahkan naskah dengan mengunggah foto folio manuskrip asli untuk mulai ditranskripsi.",
+                        style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(
+                        onClick = { viewModel.setShowAddDocDialog(true) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GoldAmber,
+                            contentColor = ObsidianBg
+                        )
+                    ) {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Tambah Naskah dari Foto", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
 
         // Dialogs
@@ -338,10 +399,20 @@ fun ManuScribeApp(
 
         if (showAddDocDialog) {
             AddDocumentDialog(
-                onAddDocument = { title, repo, period, scriptType, linesText ->
-                    viewModel.createNewDocument(title, repo, period, scriptType, linesText)
+                pickedImageUri = newDocImageUri,
+                onPickImage = {
+                    newDocPhotoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
                 },
-                onDismiss = { viewModel.setShowAddDocDialog(false) }
+                onAddDocument = { title, repo, period, scriptType, lineCount ->
+                    viewModel.createNewDocument(title, repo, period, scriptType, lineCount, newDocImageUri)
+                    newDocImageUri = null
+                },
+                onDismiss = {
+                    newDocImageUri = null
+                    viewModel.setShowAddDocDialog(false)
+                }
             )
         }
     }

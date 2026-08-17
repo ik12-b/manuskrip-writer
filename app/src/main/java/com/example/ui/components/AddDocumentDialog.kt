@@ -1,11 +1,14 @@
 package com.example.ui.components
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,11 +40,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.example.ui.theme.GoldAmber
 import com.example.ui.theme.ObsidianBg
 import com.example.ui.theme.SlateParchmentBg
@@ -50,20 +56,16 @@ import com.example.ui.theme.TextSecondary
 
 @Composable
 fun AddDocumentDialog(
-    onAddDocument: (title: String, repository: String, period: String, scriptType: String, linesText: String) -> Unit,
+    pickedImageUri: Uri?,
+    onPickImage: () -> Unit,
+    onAddDocument: (title: String, repository: String, period: String, scriptType: String, lineCount: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var repository by remember { mutableStateOf("") }
     var period by remember { mutableStateOf("") }
     var scriptType by remember { mutableStateOf("Naskh") }
-    var linesText by remember {
-        mutableStateOf(
-            "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ\n" +
-            "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ\n" +
-            "الرَّحْمَٰنِ الرَّحِيمِ ۝ مَالِكِ يَوْمِ الدِّينِ"
-        )
-    }
+    var lineCountText by remember { mutableStateOf("8") }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -109,6 +111,59 @@ fun AddDocumentDialog(
                             contentDescription = "Tutup",
                             tint = TextSecondary,
                             modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Foto Manuskrip Asli — WAJIB. Menggantikan kotak "ketik ulang teks"
+                // versi lama: sekarang sumber manuskrip harus foto sungguhan, dan
+                // teksnya ditranskripsi belakangan dari foto itu, bukan diketik duluan.
+                Text(
+                    text = "Foto Manuskrip Asli *",
+                    style = MaterialTheme.typography.labelLarge.copy(color = TextPrimary),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                if (pickedImageUri != null) {
+                    Column {
+                        AsyncImage(
+                            model = pickedImageUri,
+                            contentDescription = "Pratinjau foto manuskrip",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(0.75f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        TextButton(onClick = onPickImage) {
+                            Text("Ganti Foto", color = GoldAmber)
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x1AD4AF37))
+                            .border(1.dp, GoldAmber.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .clickable(onClick = onPickImage),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AddPhotoAlternate,
+                            contentDescription = null,
+                            tint = GoldAmber,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Ketuk untuk pilih foto folio manuskrip",
+                            style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary)
                         )
                     }
                 }
@@ -178,18 +233,25 @@ fun AddDocumentDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Line texts (1 line per line)
+                // Jumlah baris — dipakai untuk membagi rata tinggi foto jadi kotak
+                // per-baris (bounding box) sebagai titik awal transkripsi. Belum ada
+                // deteksi baris otomatis, jadi pembagian ini murni perkiraan rata.
                 OutlinedTextField(
-                    value = linesText,
-                    onValueChange = { linesText = it },
-                    label = { Text("Baris Teks Manuskrip (1 baris per enter)") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(130.dp),
+                    value = lineCountText,
+                    onValueChange = { new -> if (new.all { it.isDigit() } && new.length <= 3) lineCountText = new },
+                    label = { Text("Jumlah Baris pada Folio Ini") },
+                    placeholder = { Text("misal: 8") },
+                    modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = GoldAmber,
                         unfocusedBorderColor = SurfaceBorder
-                    )
+                    ),
+                    singleLine = true
+                )
+                Text(
+                    text = "Foto akan dibagi rata jadi kotak per baris — nanti bisa disesuaikan saat transkripsi.",
+                    style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary),
+                    modifier = Modifier.padding(top = 2.dp)
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -204,8 +266,15 @@ fun AddDocumentDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            onAddDocument(title, repository, period, scriptType, linesText)
+                            onAddDocument(
+                                title,
+                                repository,
+                                period,
+                                scriptType,
+                                lineCountText.toIntOrNull() ?: 0
+                            )
                         },
+                        enabled = pickedImageUri != null && title.isNotBlank() && (lineCountText.toIntOrNull() ?: 0) > 0,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = GoldAmber,
                             contentColor = ObsidianBg

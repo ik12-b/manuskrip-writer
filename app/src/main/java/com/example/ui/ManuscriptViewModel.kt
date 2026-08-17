@@ -385,27 +385,46 @@ class ManuscriptViewModel(application: Application) : AndroidViewModel(applicati
         repositoryName: String,
         datePeriod: String,
         scriptType: String,
-        linesText: String
+        lineCount: Int,
+        imageUri: Uri?
     ) {
-        viewModelScope.launch {
-            val linesList = linesText.lines()
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
+        if (title.isBlank()) {
+            showToast("Judul naskah wajib diisi!", isError = true)
+            return
+        }
+        if (imageUri == null) {
+            showToast("Pilih foto manuskrip terlebih dahulu!", isError = true)
+            return
+        }
+        if (lineCount <= 0) {
+            showToast("Jumlah baris harus lebih dari 0!", isError = true)
+            return
+        }
 
-            if (title.isBlank() || linesList.isEmpty()) {
-                showToast("Judul dan teks baris wajib diisi!", isError = true)
+        viewModelScope.launch {
+            // Kunci nama file cukup unik (timestamp) — tidak perlu sama dengan folioId
+            // yang baru dibuat Repository di bawah, cuma dipakai sebagai nama file.
+            val imagePath = withContext(Dispatchers.IO) {
+                BitmapUtils.persistPickedImage(getApplication(), imageUri, "newdoc_${System.currentTimeMillis()}")
+            }
+            if (imagePath == null) {
+                showToast("Gagal menyimpan foto manuskrip.", isError = true)
                 return@launch
             }
 
-            repository.addNewDocument(
+            val docId = repository.addNewDocument(
                 title = title,
                 repository = repositoryName.ifBlank { "Koleksi Pribadi" },
                 datePeriod = datePeriod.ifBlank { "Kontemporer" },
                 scriptType = scriptType.ifBlank { "Naskh" },
-                firstFolioLines = linesList
+                folioImagePath = imagePath,
+                lineCount = lineCount
             )
             _showAddDocDialog.value = false
-            showToast("Dokumen '$title' berhasil dibuat!")
+            showToast("Dokumen '$title' dibuat dari foto — silakan transkripsi tiap baris.")
+
+            // Langsung pindah ke dokumen yang baru dibuat
+            allDocuments.value.firstOrNull { it.id == docId }?.let { selectDocument(it) }
         }
     }
 

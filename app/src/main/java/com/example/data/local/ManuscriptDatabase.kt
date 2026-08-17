@@ -4,15 +4,11 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.DocumentEntity
 import com.example.data.model.FolioEntity
 import com.example.data.model.LineEntity
 import com.example.data.model.SyncQueueEntity
 import com.example.data.model.TranscriptionEntity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 @Database(
     entities = [
@@ -34,27 +30,15 @@ abstract class ManuscriptDatabase : RoomDatabase() {
         private var INSTANCE: ManuscriptDatabase? = null
 
         fun getInstance(context: Context): ManuscriptDatabase {
+            // Database mulai KOSONG — tidak ada lagi auto-seed manuskrip contoh
+            // (Ibn Sina, Sahih Bukhari, dst). Dokumen hanya muncul lewat alur
+            // "Tambah Naskah" yang mengunggah foto asli (lihat AddDocumentDialog).
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     ManuscriptDatabase::class.java,
                     "manuscribe_arab.db"
                 )
-                    .addCallback(object : Callback() {
-                        override fun onCreate(db: SupportSQLiteDatabase) {
-                            super.onCreate(db)
-                            // Seed initial historical manuscripts asynchronously
-                            CoroutineScope(Dispatchers.IO).launch {
-                                val dao = getInstance(context).manuscriptDao()
-                                dao.insertDocuments(InitialManuscriptData.sampleDocuments)
-                                dao.insertFolios(InitialManuscriptData.sampleFolios)
-                                dao.insertLines(InitialManuscriptData.sampleLines)
-                                InitialManuscriptData.sampleTranscriptions.forEach {
-                                    dao.saveTranscription(it)
-                                }
-                            }
-                        }
-                    })
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

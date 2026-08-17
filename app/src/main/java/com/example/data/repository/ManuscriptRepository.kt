@@ -118,13 +118,24 @@ class ManuscriptRepository(
         return@withContext pendingItems.size
     }
 
+    /**
+     * Buat dokumen baru dari FOTO manuskrip asli yang diunggah pengguna, dibagi rata
+     * menjadi [lineCount] baris berdasarkan tinggi foto. Belum ada segmentasi baris
+     * otomatis (butuh model deteksi baris terpisah) — pembagian rata ini titik awal
+     * yang masih bisa berbeda dari baris sesungguhnya di foto.
+     *
+     * originalScriptText SENGAJA dikosongkan: teksnya memang belum diketahui — itulah
+     * yang akan ditranskripsi pengguna dari foto asli (bukan disalin dari data yang
+     * sudah ada, seperti pada versi lama aplikasi ini).
+     */
     suspend fun addNewDocument(
         title: String,
         repository: String,
         datePeriod: String,
         scriptType: String,
-        firstFolioLines: List<String>
-    ) = withContext(Dispatchers.IO) {
+        folioImagePath: String,
+        lineCount: Int
+    ): String = withContext(Dispatchers.IO) {
         val docId = "doc_${System.currentTimeMillis()}"
         val folioId = "folio_${docId}_1r"
 
@@ -136,7 +147,7 @@ class ManuscriptRepository(
             language = "Arabic (العربية)",
             scriptType = scriptType,
             totalFolios = 1,
-            description = "Manuskrip kustom ditambahkan oleh pengguna."
+            description = "Manuskrip diunggah oleh pengguna."
         )
 
         val folio = FolioEntity(
@@ -144,26 +155,29 @@ class ManuscriptRepository(
             documentId = docId,
             folioNumber = "1r",
             title = "Folio 1r",
-            totalLines = firstFolioLines.size
+            imageUrl = folioImagePath,
+            totalLines = lineCount
         )
 
-        val lines = firstFolioLines.mapIndexed { index, text ->
+        val lineHeight = 1f / lineCount
+        val lines = (0 until lineCount).map { index ->
             LineEntity(
                 id = "line_${folioId}_${index + 1}",
                 folioId = folioId,
                 lineNumber = index + 1,
-                originalScriptText = text,
+                originalScriptText = "",
                 contextTranslation = "",
                 scriptStyle = scriptType,
-                bboxTop = 0.08f * (index + 1),
-                bboxLeft = 0.05f,
-                bboxWidth = 0.90f,
-                bboxHeight = 0.07f
+                bboxTop = index * lineHeight,
+                bboxLeft = 0.03f,
+                bboxWidth = 0.94f,
+                bboxHeight = lineHeight
             )
         }
 
         dao.insertDocument(document)
         dao.insertFolios(listOf(folio))
         dao.insertLines(lines)
+        docId
     }
 }

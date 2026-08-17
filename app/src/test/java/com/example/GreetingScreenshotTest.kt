@@ -4,10 +4,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
-import com.example.data.local.InitialManuscriptData
-import com.example.data.model.LineWithTranscription
+import com.example.data.model.DocumentEntity
+import com.example.data.model.FolioEntity
 import com.example.ui.components.ManuscriptHeader
-import com.example.ui.components.ManuscriptPanel
 import com.example.ui.theme.MyApplicationTheme
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -27,8 +26,21 @@ class GreetingScreenshotTest {
 
   @Test
   fun greeting_screenshot() {
-    val sampleDoc = InitialManuscriptData.sampleDocuments.first()
-    val sampleFolio = InitialManuscriptData.sampleFolios.first()
+    val sampleDoc = DocumentEntity(
+      id = "test_doc",
+      title = "Naskah Uji Screenshot",
+      repository = "Test Repository",
+      datePeriod = "1400 H",
+      language = "Arabic (العربية)",
+      scriptType = "Naskh",
+      totalFolios = 1
+    )
+    val sampleFolio = FolioEntity(
+      id = "test_folio",
+      documentId = "test_doc",
+      folioNumber = "1r",
+      title = "Folio 1r"
+    )
 
     composeTestRule.setContent {
       MyApplicationTheme {
@@ -41,6 +53,7 @@ class GreetingScreenshotTest {
           isSyncing = false,
           onOpenDocPicker = {},
           onOpenExport = {},
+          onExportPdf = {},
           onOpenAddDoc = {},
           onSyncNow = {}
         )

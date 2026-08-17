@@ -291,7 +291,8 @@ fun PdfTypewriterSheet(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // The Actual Large PDF Sheet (Parchment Document Paper)
+                // Kertas PDF polos — putih standar seperti aplikasi PDF viewer biasa,
+                // bukan lagi "parchment ivory" bergaya manuskrip antik.
                 Box(
                     modifier = Modifier
                         .size(pdfSheetWidthDp, pdfSheetHeightDp)
@@ -301,40 +302,21 @@ fun PdfTypewriterSheet(
                             translationX = animatedPanX
                             translationY = animatedPanY
                         }
-                        .shadow(16.dp, RoundedCornerShape(6.dp))
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFFFBF7EE)) // Classical Parchment Ivory Document Paper
-                        .border(1.5.dp, Color(0xFFC7BBA5), RoundedCornerShape(6.dp))
+                        .shadow(8.dp, RoundedCornerShape(2.dp))
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White)
+                        .border(1.dp, Color(0xFFDDDDDD), RoundedCornerShape(2.dp))
                 ) {
-                    // PDF Background Rules & Margin Lines
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val marginX = 48.dp.toPx()
-                        // Left Red Margin Line
-                        drawLine(
-                            color = Color(0xFFDC2626).copy(alpha = 0.45f),
-                            start = Offset(marginX, 0f),
-                            end = Offset(marginX, size.height),
-                            strokeWidth = 2f
-                        )
-                        // Outer Document Border
-                        drawRect(
-                            color = Color(0xFFD6CEBA),
-                            topLeft = Offset(16.dp.toPx(), 16.dp.toPx()),
-                            size = Size(size.width - 32.dp.toPx(), size.height - 32.dp.toPx()),
-                            style = Stroke(width = 1f)
-                        )
-                    }
-
                     // Content on PDF Page
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 24.dp, vertical = 24.dp)
                     ) {
-                        // PDF Document Header Title
-                        PdfSheetHeaderBanner(
-                            docTitle = document?.title ?: "Manuskrip Arab Kuno",
-                            folioCode = folio?.folioNumber ?: "1r"
+                        // Judul halaman PDF — polos, cuma info folio
+                        PdfPageHeader(
+                            docTitle = document?.title ?: "Dokumen",
+                            folioCode = folio?.folioNumber ?: "1"
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -371,21 +353,16 @@ fun PdfTypewriterSheet(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // PDF Page Footer Seal
-                        PdfSheetFooterStamp(
-                            folioCode = folio?.folioNumber ?: "1r",
+                        // Nomor halaman — polos seperti footer PDF viewer biasa
+                        PdfPageFooter(
+                            folioCode = folio?.folioNumber ?: "1",
                             totalLines = lines.size
                         )
                     }
                 }
 
-                // Antique Typewriter Strike-Point Alignment Crosshair / Platen Indicator
-                if (autoCarriageShift) {
-                    TypewriterPlatenGuideIndicator(
-                        selectedRibbon = selectedRibbon,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
+                // (indikator crosshair mekanis khas mesin ketik sudah dihapus —
+                // tidak relevan untuk tampilan kertas PDF polos)
 
                 // Synchronized Edge Scroll & Link Badge
                 if (syncController.isLinked) {
@@ -824,70 +801,26 @@ private fun TypewriterMechanicalHeader(
 }
 
 @Composable
-private fun TypewriterPlatenGuideIndicator(
-    selectedRibbon: TypewriterRibbon,
-    modifier: Modifier = Modifier
-) {
-    // Mechanical typebar strike indicator in the center of the viewport
-    Box(
-        modifier = modifier
-            .size(36.dp, 36.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            // Typebar alignment guide brackets
-            val bracketColor = Color(0xFF6366F1).copy(alpha = 0.45f)
-            val strokeW = 1.5.dp.toPx()
-            
-            // Top and bottom tick
-            drawLine(
-                color = bracketColor,
-                start = Offset(size.width / 2f, 0f),
-                end = Offset(size.width / 2f, 6.dp.toPx()),
-                strokeWidth = strokeW
-            )
-            drawLine(
-                color = bracketColor,
-                start = Offset(size.width / 2f, size.height - 6.dp.toPx()),
-                end = Offset(size.width / 2f, size.height),
-                strokeWidth = strokeW
-            )
-        }
-    }
-}
-
-@Composable
-private fun PdfSheetHeaderBanner(
+private fun PdfPageHeader(
     docTitle: String,
     folioCode: String
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp, horizontal = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(vertical = 4.dp, horizontal = 12.dp)
     ) {
         Text(
-            text = "DOKUMEN TRANSKRIPSI PDF ASLI (PENGETIKAN LANGSUNG)",
-            style = MaterialTheme.typography.labelSmall.copy(
-                color = Color(0xFF8C7358),
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-                fontSize = 9.sp
-            )
-        )
-        Text(
-            text = "$docTitle • Folio $folioCode",
+            text = "$docTitle — Folio $folioCode",
             style = MaterialTheme.typography.labelMedium.copy(
-                color = Color(0xFF4A3828),
-                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF333333),
                 fontSize = 11.sp
             )
         )
         HorizontalDivider(
             modifier = Modifier.padding(top = 4.dp),
             thickness = 1.dp,
-            color = Color(0xFFD6CEBA)
+            color = Color(0xFFE5E5E5)
         )
     }
 }
@@ -1151,30 +1084,19 @@ private fun AlternativeReadingsBar(
 }
 
 @Composable
-private fun PdfSheetFooterStamp(
+private fun PdfPageFooter(
     folioCode: String,
     totalLines: Int
 ) {
-    Column(
+    Text(
+        text = "Folio $folioCode • $totalLines baris",
+        style = MaterialTheme.typography.labelSmall.copy(
+            color = Color(0xFF999999),
+            fontSize = 9.sp
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "— MATRIKS TRANSKRIPSI RESMI —",
-            style = MaterialTheme.typography.labelSmall.copy(
-                color = Color(0xFFA89B87),
-                fontSize = 9.sp,
-                letterSpacing = 1.sp
-            )
-        )
-        Text(
-            text = "Folio $folioCode • $totalLines Baris Selesai Disusun",
-            style = MaterialTheme.typography.labelSmall.copy(
-                color = Color(0xFF8C7E6A),
-                fontSize = 8.sp
-            )
-        )
-    }
+        textAlign = TextAlign.Center
+    )
 }
