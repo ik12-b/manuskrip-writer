@@ -135,9 +135,24 @@ class ManuscriptRepository(
         scriptType: String,
         folioImagePath: String,
         lineCount: Int
+    ): String = addNewDocumentFromPages(
+        title, repository, datePeriod, scriptType, listOf(folioImagePath), lineCount
+    )
+
+    /**
+     * Sama seperti [addNewDocument], tapi menerima BANYAK foto folio sekaligus — dipakai
+     * saat mengimpor PDF hasil scan multi-halaman (satu halaman PDF = satu folio).
+     * [lineCount] diterapkan rata ke setiap halaman.
+     */
+    suspend fun addNewDocumentFromPages(
+        title: String,
+        repository: String,
+        datePeriod: String,
+        scriptType: String,
+        folioImagePaths: List<String>,
+        lineCount: Int
     ): String = withContext(Dispatchers.IO) {
         val docId = "doc_${System.currentTimeMillis()}"
-        val folioId = "folio_${docId}_1r"
 
         val document = DocumentEntity(
             id = docId,
@@ -146,38 +161,119 @@ class ManuscriptRepository(
             datePeriod = datePeriod,
             language = "Arabic (العربية)",
             scriptType = scriptType,
-            totalFolios = 1,
+            totalFolios = folioImagePaths.size,
             description = "Manuskrip diunggah oleh pengguna."
         )
 
-        val folio = FolioEntity(
-            id = folioId,
-            documentId = docId,
-            folioNumber = "1r",
-            title = "Folio 1r",
-            imageUrl = folioImagePath,
-            totalLines = lineCount
-        )
-
-        val lineHeight = 1f / lineCount
-        val lines = (0 until lineCount).map { index ->
-            LineEntity(
-                id = "line_${folioId}_${index + 1}",
-                folioId = folioId,
-                lineNumber = index + 1,
-                originalScriptText = "",
-                contextTranslation = "",
-                scriptStyle = scriptType,
-                bboxTop = index * lineHeight,
-                bboxLeft = 0.03f,
-                bboxWidth = 0.94f,
-                bboxHeight = lineHeight
+        val folios = mutableListOf<FolioEntity>()
+        val allLines = mutableListOf<LineEntity>()
+        folioImagePaths.forEachIndexed { pageIndex, imagePath ->
+            val folioNumber = "${pageIndex + 1}r"
+            val folioId = "folio_${docId}_$folioNumber"
+            folios.add(
+                FolioEntity(
+                    id = folioId,
+                    documentId = docId,
+                    folioNumber = folioNumber,
+                    title = "Folio $folioNumber",
+                    imageUrl = imagePath,
+                    totalLines = lineCount
+                )
             )
+
+            val lineHeight = 1f / lineCount
+            (0 until lineCount).forEach { index ->
+                allLines.add(
+                    LineEntity(
+                        id = "line_${folioId}_${index + 1}",
+                        folioId = folioId,
+                        lineNumber = index + 1,
+                        originalScriptText = "",
+                        contextTranslation = "",
+                        scriptStyle = scriptType,
+                        bboxTop = index * lineHeight,
+                        bboxLeft = 0.03f,
+                        bboxWidth = 0.94f,
+                        bboxHeight = lineHeight
+                    )
+                )
+            }
         }
 
         dao.insertDocument(document)
-        dao.insertFolios(listOf(folio))
-        dao.insertLines(lines)
+        dao.insertFolios(folios)
+        dao.insertLines(allLines)
         docId
+    }
+
+    /**
+     * Sisipkan baris kosong baru tepat setelah [afterLineId] pada folio yang sama
+     * (atau di akhir kalau [afterLineId] null), lalu bagi ulang bbox SEMUA baris di
+     * folio itu secara rata — konsisten dengan cara bbox pertama kali dibuat saat
+     * upload, supaya highlight baris di panel foto tetap masuk akal. Ini yang
+     * memberi penulis kebebasan mengatur ulang struktur baris, tidak terkunci ke
+     * jumlah baris yang dipilih waktu upload.
+     */
+    suspend fun insertLineAfter(
+        folioId: String,
+        afterLineId: String?,
+        scriptType: String
+    ) = withContext(Dispatchers.IO) {
+        val existing = dao.getLinesForFolioOnce(folioId).sortedBy { it.lineNumber }
+        val insertAt = if (afterLineId == null) {
+            existing.size
+        } else {
+            val idx = existing.indexOfFirst { it.id == afterLineId }
+            if (idx == -1) existing.size else idx + 1
+        }
+
+        val newLineId = "line_${folioId}_${System.currentTimeMillis()}"
+        val newLine = LineEntity(
+            id = newLineId,
+            folioId = folioId,
+            lineNumber = insertAt + 1,
+            originalScriptText = "",
+            contextTranslation = "",
+            scriptStyle = scriptType,
+            bboxTop = 0f,
+            bboxLeft = 0.03f,
+            bboxWidth = 0.94f,
+            bboxHeight = 0f // dihitung ulang oleh reflowBboxes() di bawah
+        )
+
+        val reflowed = reflowBboxes(existing.toMutableList().apply { add(insertAt, newLine) })
+        val newLineFinal = reflowed.first { it.id == newLineId }
+        val updatedExisting = reflowed.filter { it.id != newLineId }
+
+        dao.insertLines(listOf(newLineFinal)) // baris BARU: aman pakai insert
+        if (updatedExisting.isNotEmpty()) dao.updateLines(updatedExisting) // baris LAMA: UPDATE, bukan insert-replace
+    }
+
+    /**
+     * Hapus satu baris. Transkripsinya ikut terhapus otomatis lewat cascade delete
+     * Room (LineEntity->TranscriptionEntity). Tidak mengizinkan folio sampai kosong
+     * tanpa baris sama sekali — return false kalau ini baris terakhir.
+     */
+    suspend fun deleteLine(folioId: String, lineId: String): Boolean = withContext(Dispatchers.IO) {
+        val existing = dao.getLinesForFolioOnce(folioId).sortedBy { it.lineNumber }
+        if (existing.size <= 1) return@withContext false
+
+        dao.deleteLine(lineId)
+        dao.deleteFromSyncQueue(listOf(lineId))
+
+        val remaining = reflowBboxes(existing.filter { it.id != lineId })
+        if (remaining.isNotEmpty()) dao.updateLines(remaining)
+        true
+    }
+
+    private fun reflowBboxes(lines: List<LineEntity>): List<LineEntity> {
+        val lineHeight = 1f / lines.size.coerceAtLeast(1)
+        return lines.mapIndexed { index, line ->
+            line.copy(
+                lineNumber = index + 1,
+                bboxTop = index * lineHeight,
+                bboxHeight = lineHeight
+            )
+        }
     }
 }

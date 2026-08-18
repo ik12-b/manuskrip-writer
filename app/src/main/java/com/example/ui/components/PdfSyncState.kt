@@ -20,6 +20,17 @@ class PdfLinkedSyncController(
     var bottomZoomScale by mutableFloatStateOf(initialBottomZoom)
     var sharedPanX by mutableFloatStateOf(0f)
     var sharedPanY by mutableFloatStateOf(0f)
+
+    // Pan KHUSUS untuk "carriage shift" otomatis saat mengetik di panel bawah (kertas),
+    // supaya kursor tetap terlihat. Sengaja TERPISAH dari sharedPanX/Y: dulu carriage
+    // shift menulis ke sharedPanX/Y yang juga dipakai panel ATAS (foto asli) untuk pan —
+    // akibatnya mengetik satu kata membuat foto manuskrip ikut bergeser keluar dari
+    // posisi seharusnya. sharedPanX/Y sekarang murni untuk gestur geser/zoom yang
+    // memang sengaja ditautkan (tombol Link), typewriterAutoPanX/Y murni untuk
+    // pergeseran otomatis kertas saat mengetik dan tidak pernah memengaruhi foto.
+    var typewriterAutoPanX by mutableFloatStateOf(0f)
+    var typewriterAutoPanY by mutableFloatStateOf(0f)
+
     var isNearEdge by mutableStateOf(false)
     var lastSyncSource by mutableStateOf("system") // "top", "bottom", "typing", "system"
 
@@ -74,9 +85,10 @@ class PdfLinkedSyncController(
         maxBoundX: Float = 500f,
         maxBoundY: Float = 800f
     ) {
-        // Clamp to ensure edge auto-scroll stays within PDF margins
-        sharedPanX = targetPanX.coerceIn(-maxBoundX, maxBoundX)
-        sharedPanY = targetPanY.coerceIn(-maxBoundY, maxBoundY)
+        // Carriage-shift OTOMATIS saat mengetik — hanya menggeser kertas (panel bawah),
+        // TIDAK PERNAH menyentuh sharedPanX/Y (yang membuat foto asli ikut bergeser).
+        typewriterAutoPanX = targetPanX.coerceIn(-maxBoundX, maxBoundX)
+        typewriterAutoPanY = targetPanY.coerceIn(-maxBoundY, maxBoundY)
         isNearEdge = true
         lastSyncSource = "typing_edge"
     }
@@ -84,6 +96,8 @@ class PdfLinkedSyncController(
     fun autoAlignAndCenter() {
         sharedPanX = 0f
         sharedPanY = 0f
+        typewriterAutoPanX = 0f
+        typewriterAutoPanY = 0f
         isNearEdge = false
         lastSyncSource = "auto_align"
     }
@@ -93,6 +107,8 @@ class PdfLinkedSyncController(
         bottomZoomScale = 1.85f
         sharedPanX = 0f
         sharedPanY = 0f
+        typewriterAutoPanX = 0f
+        typewriterAutoPanY = 0f
         isNearEdge = false
         lastSyncSource = "reset"
     }

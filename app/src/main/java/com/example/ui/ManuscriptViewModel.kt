@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.AndroidViewModel
@@ -12,6 +13,7 @@ import com.example.data.model.LineEntity
 import com.example.data.model.LineWithTranscription
 import com.example.data.repository.ManuscriptRepository
 import com.example.utils.BitmapUtils
+import com.example.utils.PdfImportUtils
 import com.example.utils.TeiXmlExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -167,6 +169,48 @@ class ManuscriptViewModel(application: Application) : AndroidViewModel(applicati
             saveCurrentLineImmediately()
             _currentLineIndex.value = index
             updateActiveLineState(lineList[index])
+        }
+    }
+
+    /**
+     * Sisipkan baris kosong baru tepat setelah baris yang sedang aktif, lalu pindah
+     * ke baris baru itu. Inilah yang memberi penulis kebebasan mengatur struktur —
+     * tidak terkunci ke jumlah baris yang dipilih waktu upload foto/PDF.
+     */
+    fun addLineAfterCurrent() {
+        val folio = _selectedFolio.value ?: return
+        val doc = _selectedDocument.value ?: return
+        val currentLines = _lines.value
+        val idx = _currentLineIndex.value
+        val afterLineId = currentLines.getOrNull(idx)?.line?.id
+
+        viewModelScope.launch {
+            saveCurrentLineImmediately()
+            repository.insertLineAfter(folio.id, afterLineId, doc.scriptType)
+            // Daftar baris akan otomatis refresh lewat Flow Room (linesCollectJob) —
+            // set target index duluan supaya begitu daftar baru datang, langsung
+            // pindah & fokus ke baris kosong yang baru dibuat.
+            _currentLineIndex.value = idx + 1
+            showToast("Baris baru ditambahkan.")
+        }
+    }
+
+    /**
+     * Hapus baris yang sedang aktif. Minimal harus ada 1 baris tersisa di folio.
+     */
+    fun deleteCurrentLine() {
+        val folio = _selectedFolio.value ?: return
+        val currentLines = _lines.value
+        val idx = _currentLineIndex.value
+        val line = currentLines.getOrNull(idx)?.line ?: return
+
+        viewModelScope.launch {
+            val deleted = repository.deleteLine(folio.id, line.id)
+            if (deleted) {
+                showToast("Baris dihapus.")
+            } else {
+                showToast("Tidak bisa menghapus — minimal harus ada 1 baris.", isError = true)
+            }
         }
     }
 
@@ -386,14 +430,14 @@ class ManuscriptViewModel(application: Application) : AndroidViewModel(applicati
         datePeriod: String,
         scriptType: String,
         lineCount: Int,
-        imageUri: Uri?
+        fileUri: Uri?
     ) {
         if (title.isBlank()) {
             showToast("Judul naskah wajib diisi!", isError = true)
             return
         }
-        if (imageUri == null) {
-            showToast("Pilih foto manuskrip terlebih dahulu!", isError = true)
+        if (fileUri == null) {
+            showToast("Pilih foto atau PDF manuskrip terlebih dahulu!", isError = true)
             return
         }
         if (lineCount <= 0) {
@@ -402,26 +446,47 @@ class ManuscriptViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         viewModelScope.launch {
-            // Kunci nama file cukup unik (timestamp) — tidak perlu sama dengan folioId
-            // yang baru dibuat Repository di bawah, cuma dipakai sebagai nama file.
-            val imagePath = withContext(Dispatchers.IO) {
-                BitmapUtils.persistPickedImage(getApplication(), imageUri, "newdoc_${System.currentTimeMillis()}")
-            }
-            if (imagePath == null) {
-                showToast("Gagal menyimpan foto manuskrip.", isError = true)
-                return@launch
+            val context: Context = getApplication()
+            val isPdf = withContext(Dispatchers.IO) { PdfImportUtils.isPdf(context, fileUri) }
+
+            val docId = if (isPdf) {
+                // Import PDF hasil scan — satu halaman PDF menjadi satu folio.
+                val pages = withContext(Dispatchers.IO) {
+                    PdfImportUtils.importPdfPages(context, fileUri, "newdoc_${System.currentTimeMillis()}")
+                }
+                if (pages.isNullOrEmpty()) {
+                    showToast("Gagal membaca PDF — pastikan file tidak rusak/terkunci.", isError = true)
+                    return@launch
+                }
+                repository.addNewDocumentFromPages(
+                    title = title,
+                    repository = repositoryName.ifBlank { "Koleksi Pribadi" },
+                    datePeriod = datePeriod.ifBlank { "Kontemporer" },
+                    scriptType = scriptType.ifBlank { "Naskh" },
+                    folioImagePaths = pages.sortedBy { it.pageIndex }.map { it.imagePath },
+                    lineCount = lineCount
+                )
+            } else {
+                // Foto tunggal — satu folio.
+                val imagePath = withContext(Dispatchers.IO) {
+                    BitmapUtils.persistPickedImage(context, fileUri, "newdoc_${System.currentTimeMillis()}")
+                }
+                if (imagePath == null) {
+                    showToast("Gagal menyimpan foto manuskrip.", isError = true)
+                    return@launch
+                }
+                repository.addNewDocument(
+                    title = title,
+                    repository = repositoryName.ifBlank { "Koleksi Pribadi" },
+                    datePeriod = datePeriod.ifBlank { "Kontemporer" },
+                    scriptType = scriptType.ifBlank { "Naskh" },
+                    folioImagePath = imagePath,
+                    lineCount = lineCount
+                )
             }
 
-            val docId = repository.addNewDocument(
-                title = title,
-                repository = repositoryName.ifBlank { "Koleksi Pribadi" },
-                datePeriod = datePeriod.ifBlank { "Kontemporer" },
-                scriptType = scriptType.ifBlank { "Naskh" },
-                folioImagePath = imagePath,
-                lineCount = lineCount
-            )
             _showAddDocDialog.value = false
-            showToast("Dokumen '$title' dibuat dari foto — silakan transkripsi tiap baris.")
+            showToast("Dokumen '$title' dibuat — silakan transkripsi tiap baris.")
 
             // Langsung pindah ke dokumen yang baru dibuat
             allDocuments.value.firstOrNull { it.id == docId }?.let { selectDocument(it) }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -124,11 +125,13 @@ fun ManuScribeApp(
         photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
-    // Photo Picker khusus dialog "Tambah Naskah" (dokumen baru dari foto)
-    var newDocImageUri by remember { mutableStateOf<Uri?>(null) }
-    val newDocPhotoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri -> uri?.let { newDocImageUri = it } }
+    // Photo/PDF Picker khusus dialog "Tambah Naskah" (dokumen baru dari foto atau PDF
+    // hasil scan). Pakai OpenDocument (bukan PickVisualMedia) karena PickVisualMedia
+    // cuma bisa pilih gambar — di sini kita butuh gambar ATAU PDF.
+    var newDocFileUri by remember { mutableStateOf<Uri?>(null) }
+    val newDocFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { newDocFileUri = it } }
 
     // Split View Preset State: 0.50f (50/50), 0.65f (Focus Top Manuscript), 0.35f (Focus Bottom Typewriter)
     var splitRatio by remember { mutableFloatStateOf(0.48f) }
@@ -159,6 +162,12 @@ fun ManuScribeApp(
             .windowInsetsPadding(WindowInsets.navigationBars)
             .testTag("manuscribe_main_scaffold"),
         containerColor = ObsidianBg,
+        // Insets ditangani manual (statusBars/navigationBars di atas, ime di bawah
+        // pada container split-view) — matikan auto-inset Scaffold supaya tidak
+        // dobel-terapkan (dulu innerPadding dari Scaffold bisa ikut menghitung ime
+        // juga, bentrok dengan penanganan ime manual, dan panel bawah jadi ketutupan
+        // keyboard karena ruang yang dihitung tidak konsisten).
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         Column(
@@ -182,10 +191,17 @@ fun ManuScribeApp(
             )
 
             // Responsive Split-View Container (Portrait vs Landscape/Tablet)
+            // imePadding() DI SINI (bukan cuma di dalam PdfTypewriterSheet) supaya
+            // pembagian weight() antara panel foto & panel kertas dihitung ulang
+            // berdasarkan tinggi yang SUDAH dikurangi tinggi keyboard — kalau cuma
+            // di dalam PdfTypewriterSheet, kotak panelnya sudah kadung dialokasikan
+            // penuh duluan (dari total tinggi layar tanpa keyboard), jadi keyboard
+            // tetap menutupi sebagian karena kotaknya tidak benar-benar mengecil.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
+                    .imePadding()
             ) {
             BoxWithConstraints(
                 modifier = Modifier
@@ -249,7 +265,9 @@ fun ManuScribeApp(
                                 onOpenNotes = { viewModel.setShowNotesDialog(true) },
                                 onRunHtr = { viewModel.runHtrRecognition() },
                                 onApplyAlternative = { alt -> viewModel.applyAlternativeReading(alt) },
-                                onInsertChar = { char -> viewModel.insertSpecialChar(char) }
+                                onInsertChar = { char -> viewModel.insertSpecialChar(char) },
+                                onAddLine = { viewModel.addLineAfterCurrent() },
+                                onDeleteLine = { viewModel.deleteCurrentLine() }
                             )
                         }
                     }
@@ -309,7 +327,9 @@ fun ManuScribeApp(
                                 onOpenNotes = { viewModel.setShowNotesDialog(true) },
                                 onRunHtr = { viewModel.runHtrRecognition() },
                                 onApplyAlternative = { alt -> viewModel.applyAlternativeReading(alt) },
-                                onInsertChar = { char -> viewModel.insertSpecialChar(char) }
+                                onInsertChar = { char -> viewModel.insertSpecialChar(char) },
+                                onAddLine = { viewModel.addLineAfterCurrent() },
+                                onDeleteLine = { viewModel.deleteCurrentLine() }
                             )
                         }
                     }
@@ -400,18 +420,16 @@ fun ManuScribeApp(
 
         if (showAddDocDialog) {
             AddDocumentDialog(
-                pickedImageUri = newDocImageUri,
-                onPickImage = {
-                    newDocPhotoPickerLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
+                pickedFileUri = newDocFileUri,
+                onPickFile = {
+                    newDocFilePickerLauncher.launch(arrayOf("image/*", "application/pdf"))
                 },
                 onAddDocument = { title, repo, period, scriptType, lineCount ->
-                    viewModel.createNewDocument(title, repo, period, scriptType, lineCount, newDocImageUri)
-                    newDocImageUri = null
+                    viewModel.createNewDocument(title, repo, period, scriptType, lineCount, newDocFileUri)
+                    newDocFileUri = null
                 },
                 onDismiss = {
-                    newDocImageUri = null
+                    newDocFileUri = null
                     viewModel.setShowAddDocDialog(false)
                 }
             )

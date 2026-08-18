@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -146,6 +147,8 @@ fun PdfTypewriterSheet(
     onRunHtr: () -> Unit,
     onApplyAlternative: (String) -> Unit,
     onInsertChar: (String) -> Unit,
+    onAddLine: () -> Unit = {},
+    onDeleteLine: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedRibbon by remember { mutableStateOf(TypewriterRibbon.BLACK) }
@@ -189,12 +192,10 @@ fun PdfTypewriterSheet(
                 val horizontalShift = (currentProgressFraction - 0.5f) * (pageWidthPx * 0.55f) * syncController.bottomZoomScale
                 val targetPanX = (-horizontalShift).coerceIn(-pageWidthPx * 0.7f, pageWidthPx * 0.7f)
 
-                if (syncController.isLinked) {
-                    syncController.triggerEdgeScroll(targetPanX, targetPanY)
-                } else {
-                    syncController.sharedPanX = targetPanX
-                    syncController.sharedPanY = targetPanY
-                }
+                // Carriage-shift OTOMATIS ini cuma menggeser KERTAS, tidak pernah menyentuh
+                // sharedPanX/Y — supaya foto manuskrip asli di panel atas tidak ikut
+                // bergeser/keluar layout setiap kali mengetik (bug sebelumnya).
+                syncController.triggerEdgeScroll(targetPanX, targetPanY)
             }
         }
     }
@@ -206,13 +207,16 @@ fun PdfTypewriterSheet(
         } catch (_: Exception) { }
     }
 
+    // Kertas bergerak karena DUA sumber: (1) sharedPanX/Y dari gestur geser/zoom yang
+    // memang sengaja ditautkan dengan panel foto (tombol Link), dan (2) typewriterAutoPanX/Y
+    // dari carriage-shift otomatis saat mengetik (khusus kertas, tidak pernah menggeser foto).
     val animatedPanX by animateFloatAsState(
-        targetValue = syncController.sharedPanX,
+        targetValue = syncController.sharedPanX + syncController.typewriterAutoPanX,
         animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "typewriter_pan_x"
     )
     val animatedPanY by animateFloatAsState(
-        targetValue = syncController.sharedPanY,
+        targetValue = syncController.sharedPanY + syncController.typewriterAutoPanY,
         animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "typewriter_pan_y"
     )
@@ -228,10 +232,14 @@ fun PdfTypewriterSheet(
             .testTag("pdf_typewriter_sheet_panel"),
         color = Color(0xFF1B1815)
     ) {
+        // imePadding() SUDAH ditangani di container split-view luar (ManuScribeApp),
+        // bukan di sini lagi — supaya weight() panel dihitung ulang berdasarkan
+        // tinggi yang sudah dikurangi keyboard (bukan cuma padding di dalam kotak
+        // yang sudah kadung dialokasikan penuh). Kalau imePadding() dipasang di dua
+        // tempat, tinggi bisa terpotong dua kali.
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
         ) {
             // Mechanical Typewriter Top Roller & Platen Controls
             TypewriterMechanicalHeader(
@@ -255,7 +263,9 @@ fun PdfTypewriterSheet(
                 onCarriageReturn = onNextLine,
                 onPreviousLine = onPreviousLine,
                 onOpenNotes = onOpenNotes,
-                onStatusChanged = onStatusChanged
+                onStatusChanged = onStatusChanged,
+                onAddLine = onAddLine,
+                onDeleteLine = onDeleteLine
             )
 
             // PDF Document Canvas (Direct In-Place Typewriter Paper with Linked Pinch-to-Zoom)
@@ -431,7 +441,9 @@ private fun TypewriterMechanicalHeader(
     onCarriageReturn: () -> Unit,
     onPreviousLine: () -> Unit,
     onOpenNotes: () -> Unit,
-    onStatusChanged: (String) -> Unit
+    onStatusChanged: (String) -> Unit,
+    onAddLine: () -> Unit,
+    onDeleteLine: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -695,18 +707,49 @@ private fun TypewriterMechanicalHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    // Notes Button
-                    IconButton(
-                        onClick = onOpenNotes,
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.EditNote,
-                            contentDescription = "Catatan Pinggir",
-                            tint = if (status == "annotated") StatusAnnotated else TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                // Tambah Baris — sisipkan baris kosong setelah baris aktif, supaya
+                // penulis tidak terkunci ke jumlah baris yang dipilih waktu upload.
+                IconButton(
+                    onClick = onAddLine,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .testTag("typewriter_add_line_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Tambah Baris",
+                        tint = Color(0xFF4ADE80),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // Hapus Baris Aktif
+                IconButton(
+                    onClick = onDeleteLine,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .testTag("typewriter_delete_line_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "Hapus Baris",
+                        tint = Color(0xFFF87171),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // Notes Button
+                IconButton(
+                    onClick = onOpenNotes,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.EditNote,
+                        contentDescription = "Catatan Pinggir",
+                        tint = if (status == "annotated") StatusAnnotated else TextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
 
                     // Status Toggle Dropdown Chip
                     Surface(

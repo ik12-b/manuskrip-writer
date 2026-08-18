@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import com.example.data.model.DocumentEntity
 import com.example.data.model.DocumentWithFolios
 import com.example.data.model.FolioEntity
@@ -48,6 +49,21 @@ interface ManuscriptDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLines(lines: List<LineEntity>)
+
+    @Query("SELECT * FROM lines WHERE folioId = :folioId ORDER BY lineNumber ASC")
+    suspend fun getLinesForFolioOnce(folioId: String): List<LineEntity>
+
+    // @Update (bukan insert-or-replace) SENGAJA dipakai untuk menata ulang nomor/bbox
+    // baris yang SUDAH ADA: INSERT OR REPLACE di SQLite = delete lalu insert ulang di
+    // belakang layar, dan itu akan memicu CASCADE DELETE ke tabel transcriptions
+    // (foreign key LineEntity->TranscriptionEntity onDelete=CASCADE) — bisa menghapus
+    // diam-diam transkripsi yang sudah diketik user setiap kali ada baris ditambah/
+    // dihapus di folio yang sama. @Update murni UPDATE SQL, tidak memicu cascade itu.
+    @Update
+    suspend fun updateLines(lines: List<LineEntity>)
+
+    @Query("DELETE FROM lines WHERE id = :lineId")
+    suspend fun deleteLine(lineId: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveTranscription(transcription: TranscriptionEntity)

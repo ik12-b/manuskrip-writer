@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,11 +55,12 @@ import com.example.ui.theme.SlateParchmentBg
 import com.example.ui.theme.SurfaceBorder
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.utils.PdfImportUtils
 
 @Composable
 fun AddDocumentDialog(
-    pickedImageUri: Uri?,
-    onPickImage: () -> Unit,
+    pickedFileUri: Uri?,
+    onPickFile: () -> Unit,
     onAddDocument: (title: String, repository: String, period: String, scriptType: String, lineCount: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -117,18 +120,50 @@ fun AddDocumentDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Foto Manuskrip Asli — WAJIB. Menggantikan kotak "ketik ulang teks"
-                // versi lama: sekarang sumber manuskrip harus foto sungguhan, dan
-                // teksnya ditranskripsi belakangan dari foto itu, bukan diketik duluan.
+                // Foto atau PDF Manuskrip Asli — WAJIB. Menggantikan kotak "ketik ulang
+                // teks" versi lama: sekarang sumber manuskrip harus foto/scan sungguhan,
+                // dan teksnya ditranskripsi belakangan, bukan diketik duluan.
+                // PDF multi-halaman didukung: satu halaman PDF = satu folio.
                 Text(
-                    text = "Foto Manuskrip Asli *",
+                    text = "Foto / PDF Hasil Scan Manuskrip *",
                     style = MaterialTheme.typography.labelLarge.copy(color = TextPrimary),
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
-                if (pickedImageUri != null) {
+                val context = LocalContext.current
+                val isPickedPdf = remember(pickedFileUri) {
+                    pickedFileUri?.let { PdfImportUtils.isPdf(context, it) } ?: false
+                }
+                if (pickedFileUri != null && isPickedPdf) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x1A22C55E))
+                            .border(1.dp, Color(0xFF22C55E).copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PictureAsPdf,
+                            contentDescription = null,
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "File PDF dipilih — tiap halaman jadi satu folio",
+                            style = MaterialTheme.typography.labelMedium.copy(color = TextPrimary)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    TextButton(onClick = onPickFile) {
+                        Text("Ganti File", color = GoldAmber)
+                    }
+                } else if (pickedFileUri != null) {
                     Column {
                         AsyncImage(
-                            model = pickedImageUri,
+                            model = pickedFileUri,
                             contentDescription = "Pratinjau foto manuskrip",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -138,7 +173,7 @@ fun AddDocumentDialog(
                             contentScale = ContentScale.Crop
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        TextButton(onClick = onPickImage) {
+                        TextButton(onClick = onPickFile) {
                             Text("Ganti Foto", color = GoldAmber)
                         }
                     }
@@ -150,7 +185,7 @@ fun AddDocumentDialog(
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color(0x1AD4AF37))
                             .border(1.dp, GoldAmber.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .clickable(onClick = onPickImage),
+                            .clickable(onClick = onPickFile),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
@@ -162,7 +197,7 @@ fun AddDocumentDialog(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Ketuk untuk pilih foto folio manuskrip",
+                            text = "Ketuk untuk pilih foto folio atau file PDF hasil scan",
                             style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary)
                         )
                     }
@@ -239,7 +274,7 @@ fun AddDocumentDialog(
                 OutlinedTextField(
                     value = lineCountText,
                     onValueChange = { new -> if (new.all { it.isDigit() } && new.length <= 3) lineCountText = new },
-                    label = { Text("Jumlah Baris pada Folio Ini") },
+                    label = { Text("Jumlah Baris per Halaman") },
                     placeholder = { Text("misal: 8") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -249,7 +284,7 @@ fun AddDocumentDialog(
                     singleLine = true
                 )
                 Text(
-                    text = "Foto akan dibagi rata jadi kotak per baris — nanti bisa disesuaikan saat transkripsi.",
+                    text = "Tiap halaman (foto atau per halaman PDF) dibagi rata jadi kotak per baris — nanti bisa disesuaikan saat transkripsi.",
                     style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary),
                     modifier = Modifier.padding(top = 2.dp)
                 )
@@ -274,7 +309,7 @@ fun AddDocumentDialog(
                                 lineCountText.toIntOrNull() ?: 0
                             )
                         },
-                        enabled = pickedImageUri != null && title.isNotBlank() && (lineCountText.toIntOrNull() ?: 0) > 0,
+                        enabled = pickedFileUri != null && title.isNotBlank() && (lineCountText.toIntOrNull() ?: 0) > 0,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = GoldAmber,
                             contentColor = ObsidianBg
