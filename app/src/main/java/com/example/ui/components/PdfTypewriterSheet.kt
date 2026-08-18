@@ -67,6 +67,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -161,6 +162,14 @@ fun PdfTypewriterSheet(
     val pdfSheetWidthDp = 580.dp
     val pdfSheetHeightDp = 860.dp
 
+    // Ukuran VIEWPORT SUNGGUHAN (bukan ukuran halaman virtual 580x860dp), diisi lewat
+    // .onSizeChanged() di Box kanvas kertas di bawah. Dipakai supaya batas aman pan
+    // (targetPanY/X) dihitung dari ukuran layar sungguhan — bukan pecahan tetap dari
+    // tinggi halaman (0.85f/0.9f) yang terbukti secara matematis bisa menyisakan celah
+    // (viewport tidak tertutup penuh) kalau zoom rendah + baris dekat ujung halaman.
+    var canvasHeightPx by remember { mutableFloatStateOf(0f) }
+    var canvasWidthPx by remember { mutableFloatStateOf(0f) }
+
     // Calculate approximate typing progress fraction (0.0 = right edge, 1.0 = left edge in Arabic RTL)
     val maxCharsPerLine = 45f
     val currentProgressFraction = (text.length / maxCharsPerLine).coerceIn(0f, 1f)
@@ -173,33 +182,50 @@ fun PdfTypewriterSheet(
     // Auto Carriage Shift & Synchronized Edge Scrolling
     // When text grows or reaches near the screen edge, shift carriage and sync with top PDF viewer
     //
-    // PENTING: `lines.isNotEmpty()` SENGAJA ditambahkan sebagai key. Data baris datang
-    // ASYNC lewat Flow Room — saat komposisi pertama, `lines` masih kosong (Flow belum
-    // sempat emit), jadi kondisi `lines.isNotEmpty()` di bawah gagal dan efek ini skip.
-    // Begitu data baris beneran datang, currentLineIndex/autoCarriageShift TIDAK
-    // berubah nilainya (tetap 0/true dari awal) — tanpa key ini, Compose tidak akan
-    // pernah menjalankan ulang efeknya, dan pan/center jadi permanen macet di posisi
-    // default (0,0) alih-alih ke baris aktif. Ini bug yang bikin kertas nyangkut di
-    // pojok/area hitam besar, BUKAN soal rumus pan-nya yang salah.
-    LaunchedEffect(currentLineIndex, currentProgressFraction, autoCarriageShift, syncController.bottomZoomScale, syncController.isLinked, lines.isNotEmpty()) {
+    // PENTING: `lines.isNotEmpty()` dan `canvasHeightPx > 0f` SENGAJA ditambahkan sebagai
+    // key. Data baris datang ASYNC lewat Flow Room, dan ukuran viewport sungguhan baru
+    // terukur SETELAH frame pertama (lewat onSizeChanged) — tanpa key ini, efek tidak
+    // akan jalan ulang begitu keduanya akhirnya tersedia, dan pan/center jadi permanen
+    // memakai nilai default/fallback.
+    LaunchedEffect(
+        currentLineIndex, currentProgressFraction, autoCarriageShift,
+        syncController.bottomZoomScale, syncController.isLinked,
+        lines.isNotEmpty(), canvasHeightPx > 0f
+    ) {
         if (autoCarriageShift && lines.isNotEmpty()) {
             val safeIdx = currentLineIndex.coerceIn(0, lines.size - 1)
             val lineItem = lines[safeIdx]
 
             with(density) {
-                val pageHeightPx = pdfSheetHeightDp.toPx()
-                val pageWidthPx = pdfSheetWidthDp.toPx()
+                val pageHeightPx = pdfSheetHeightDp.toPx() * syncController.bottomZoomScale
+                val pageWidthPx = pdfSheetWidthDp.toPx() * syncController.bottomZoomScale
+
+                // Batas aman DIHITUNG dari ukuran viewport sungguhan (bukan pecahan tetap
+                // dari tinggi halaman) — supaya viewport dijamin selalu tertutup penuh.
+                // Rumus: (tinggi_halaman_setelah_zoom - tinggi_viewport) / 2.
+                // Fallback ke pecahan lama HANYA kalau ukuran belum sempat terukur
+                // (frame pertama, sebelum onSizeChanged sempat jalan).
+                val maxSafePanY = if (canvasHeightPx > 0f) {
+                    ((pageHeightPx - canvasHeightPx) / 2f).coerceAtLeast(0f)
+                } else {
+                    pdfSheetHeightDp.toPx() * 0.9f
+                }
+                val maxSafePanX = if (canvasWidthPx > 0f) {
+                    ((pageWidthPx - canvasWidthPx) / 2f).coerceAtLeast(0f)
+                } else {
+                    pdfSheetWidthDp.toPx() * 0.7f
+                }
 
                 // Target line vertical center
                 val lineYPercent = lineItem.line.bboxTop + (lineItem.line.bboxHeight / 2f)
-                val rawTargetY = -((lineYPercent - 0.45f) * pageHeightPx * syncController.bottomZoomScale)
-                val targetPanY = rawTargetY.coerceIn(-pageHeightPx * 0.9f, pageHeightPx * 0.9f)
+                val rawTargetY = -((lineYPercent - 0.45f) * pageHeightPx)
+                val targetPanY = rawTargetY.coerceIn(-maxSafePanY, maxSafePanY)
 
                 // Mechanical Typewriter Horizontal Carriage Shift:
                 // When typing Arabic (RTL), text grows right-to-left.
                 // Platen shifts the sheet left so typing strike stays in view.
-                val horizontalShift = (currentProgressFraction - 0.5f) * (pageWidthPx * 0.55f) * syncController.bottomZoomScale
-                val targetPanX = (-horizontalShift).coerceIn(-pageWidthPx * 0.7f, pageWidthPx * 0.7f)
+                val horizontalShift = (currentProgressFraction - 0.5f) * (pageWidthPx * 0.55f)
+                val targetPanX = (-horizontalShift).coerceIn(-maxSafePanX, maxSafePanX)
 
                 // Carriage-shift OTOMATIS ini cuma menggeser KERTAS, tidak pernah menyentuh
                 // sharedPanX/Y — supaya foto manuskrip asli di panel atas tidak ikut
@@ -284,6 +310,10 @@ fun PdfTypewriterSheet(
                     .weight(1f)
                     .background(Color(0xFF110F0D))
                     .clip(RoundedCornerShape(0.dp))
+                    .onSizeChanged { size ->
+                        canvasHeightPx = size.height.toFloat()
+                        canvasWidthPx = size.width.toFloat()
+                    }
                     .pointerInput(syncController.isLinked) {
                         detectTransformGestures { _, pan, zoom, _ ->
                             // Linked or independent pinch-to-zoom & synchronized pan with boundaries

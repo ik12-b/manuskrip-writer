@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import coil.compose.AsyncImage
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
@@ -138,6 +139,13 @@ fun ManuscriptPdfViewer(
     val pdfPageWidthDp = 580.dp
     val pdfPageHeightDp = 860.dp
 
+    // Ukuran VIEWPORT SUNGGUHAN (bukan ukuran halaman virtual 580x860dp), diisi lewat
+    // .onSizeChanged() di Box kanvas foto di bawah. Sama seperti PdfTypewriterSheet.kt —
+    // batas aman pan dihitung dari ukuran layar sungguhan, bukan pecahan tetap dari
+    // tinggi halaman yang terbukti secara matematis bisa menyisakan celah.
+    var canvasHeightPx by remember { mutableFloatStateOf(0f) }
+    var canvasWidthPx by remember { mutableFloatStateOf(0f) }
+
     // Auto-center panel FOTO secara vertikal & horizontal ke baris yang sedang aktif.
     // PENTING: hanya bereaksi ke currentLineIndex (ganti baris), BUKAN lagi ke
     // writingProgressFraction (progres mengetik). Foto manuskrip itu statis — tidak
@@ -150,11 +158,11 @@ fun ManuscriptPdfViewer(
     // dan panel foto ini tidak pernah membaca variabel itu. Kalau tetap dipanggil
     // lewat triggerEdgeScroll di sini, panel foto tidak akan pernah auto-center lagi
     // ke baris aktif — persis bug "area hitam besar, foto nyangkut di pojok".
-    // PENTING: `lines.isNotEmpty()` SENGAJA jadi key (bukan cuma currentLineIndex &
-    // autoFollowTyping) — data baris datang ASYNC lewat Flow Room, jadi tanpa key ini
-    // efek tidak pernah jalan ulang begitu data baris (yang tadinya kosong) akhirnya
-    // datang. Lihat penjelasan lebih lengkap di PdfTypewriterSheet.kt (bug yang sama).
-    LaunchedEffect(currentLineIndex, autoFollowTyping, lines.isNotEmpty()) {
+    // PENTING: `lines.isNotEmpty()` dan `canvasHeightPx > 0f` SENGAJA jadi key — data
+    // baris datang ASYNC lewat Flow Room, dan ukuran viewport sungguhan baru terukur
+    // SETELAH frame pertama (lewat onSizeChanged). Lihat penjelasan lebih lengkap di
+    // PdfTypewriterSheet.kt (bug & rumus yang sama).
+    LaunchedEffect(currentLineIndex, autoFollowTyping, lines.isNotEmpty(), canvasHeightPx > 0f) {
         if (autoFollowTyping && lines.isNotEmpty()) {
             val safeIdx = currentLineIndex.coerceIn(0, lines.size - 1)
             val lineItem = lines[safeIdx]
@@ -163,14 +171,28 @@ fun ManuscriptPdfViewer(
             val targetXPercent = lineItem.line.bboxLeft + (lineItem.line.bboxWidth / 2f)
 
             with(density) {
-                val pageHeightPx = pdfPageHeightDp.toPx()
-                val pageWidthPx = pdfPageWidthDp.toPx()
+                val pageHeightPx = pdfPageHeightDp.toPx() * syncController.topZoomScale
+                val pageWidthPx = pdfPageWidthDp.toPx() * syncController.topZoomScale
 
-                val rawTargetY = -((targetYPercent - 0.5f) * pageHeightPx * syncController.topZoomScale)
-                val newPanY = rawTargetY.coerceIn(-pageHeightPx * 0.85f, pageHeightPx * 0.85f)
+                // Batas aman DIHITUNG dari ukuran viewport sungguhan (bukan pecahan tetap
+                // 0.85f dari tinggi halaman) — supaya viewport dijamin selalu tertutup
+                // penuh. Rumus: (tinggi_halaman_setelah_zoom - tinggi_viewport) / 2.
+                val maxSafePanY = if (canvasHeightPx > 0f) {
+                    ((pageHeightPx - canvasHeightPx) / 2f).coerceAtLeast(0f)
+                } else {
+                    pdfPageHeightDp.toPx() * 0.85f
+                }
+                val maxSafePanX = if (canvasWidthPx > 0f) {
+                    ((pageWidthPx - canvasWidthPx) / 2f).coerceAtLeast(0f)
+                } else {
+                    pdfPageWidthDp.toPx() * 0.85f
+                }
 
-                val rawTargetX = -((targetXPercent - 0.5f) * pageWidthPx * syncController.topZoomScale)
-                val newPanX = rawTargetX.coerceIn(-pageWidthPx * 0.85f, pageWidthPx * 0.85f)
+                val rawTargetY = -((targetYPercent - 0.5f) * pageHeightPx)
+                val newPanY = rawTargetY.coerceIn(-maxSafePanY, maxSafePanY)
+
+                val rawTargetX = -((targetXPercent - 0.5f) * pageWidthPx)
+                val newPanX = rawTargetX.coerceIn(-maxSafePanX, maxSafePanX)
 
                 syncController.sharedPanX = newPanX
                 syncController.sharedPanY = newPanY
@@ -235,6 +257,10 @@ fun ManuscriptPdfViewer(
                     .weight(1f)
                     .background(Color(0xFF0C0A09))
                     .clip(RoundedCornerShape(0.dp))
+                    .onSizeChanged { size ->
+                        canvasHeightPx = size.height.toFloat()
+                        canvasWidthPx = size.width.toFloat()
+                    }
                     .pointerInput(syncController.isLinked) {
                         detectTransformGestures { _, pan, zoom, _ ->
                             // Linked or independent pinch-to-zoom & synchronized pan with boundaries
