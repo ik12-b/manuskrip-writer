@@ -138,34 +138,38 @@ fun ManuscriptPdfViewer(
     val pdfPageWidthDp = 580.dp
     val pdfPageHeightDp = 860.dp
 
-    // Auto-scroll & Auto-pan sync to follow typing position and screen edges
-    LaunchedEffect(currentLineIndex, writingProgressFraction, autoFollowTyping, syncController.isLinked) {
+    // Auto-center panel FOTO secara vertikal & horizontal ke baris yang sedang aktif.
+    // PENTING: hanya bereaksi ke currentLineIndex (ganti baris), BUKAN lagi ke
+    // writingProgressFraction (progres mengetik). Foto manuskrip itu statis — tidak
+    // ada alasan foto ikut bergeser tiap kali user mengetik huruf baru di panel
+    // bawah. Ini yang menyebabkan bug "foto keluar layout waktu ngetik" sebelumnya.
+    //
+    // Juga SENGAJA menulis langsung ke sharedPanX/Y (bukan lewat
+    // syncController.triggerEdgeScroll()) — triggerEdgeScroll() sekarang khusus
+    // dipakai carriage-shift kertas di panel bawah (menulis ke typewriterAutoPanX/Y),
+    // dan panel foto ini tidak pernah membaca variabel itu. Kalau tetap dipanggil
+    // lewat triggerEdgeScroll di sini, panel foto tidak akan pernah auto-center lagi
+    // ke baris aktif — persis bug "area hitam besar, foto nyangkut di pojok".
+    LaunchedEffect(currentLineIndex, autoFollowTyping) {
         if (autoFollowTyping && lines.isNotEmpty()) {
             val safeIdx = currentLineIndex.coerceIn(0, lines.size - 1)
             val lineItem = lines[safeIdx]
 
-            // Calculate target vertical center based on line bbox
             val targetYPercent = lineItem.line.bboxTop + (lineItem.line.bboxHeight / 2f)
-            
+            val targetXPercent = lineItem.line.bboxLeft + (lineItem.line.bboxWidth / 2f)
+
             with(density) {
                 val pageHeightPx = pdfPageHeightDp.toPx()
                 val pageWidthPx = pdfPageWidthDp.toPx()
-                
-                // Vertical pan to center the active line in viewport
+
                 val rawTargetY = -((targetYPercent - 0.5f) * pageHeightPx * syncController.topZoomScale)
                 val newPanY = rawTargetY.coerceIn(-pageHeightPx * 0.85f, pageHeightPx * 0.85f)
 
-                // Horizontal pan following Arabic RTL typing progress (starts at right edge and moves left)
-                // When writing progress increases or reaches edge (> 0.65), scroll smoothly forward
-                val horizontalShift = (writingProgressFraction - 0.5f) * (pageWidthPx * 0.50f) * syncController.topZoomScale
-                val newPanX = (-horizontalShift).coerceIn(-pageWidthPx * 0.7f, pageWidthPx * 0.7f)
+                val rawTargetX = -((targetXPercent - 0.5f) * pageWidthPx * syncController.topZoomScale)
+                val newPanX = rawTargetX.coerceIn(-pageWidthPx * 0.85f, pageWidthPx * 0.85f)
 
-                if (syncController.isLinked) {
-                    syncController.triggerEdgeScroll(newPanX, newPanY)
-                } else {
-                    syncController.sharedPanX = newPanX
-                    syncController.sharedPanY = newPanY
-                }
+                syncController.sharedPanX = newPanX
+                syncController.sharedPanY = newPanY
             }
         }
     }
