@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,7 +116,22 @@ class ManuscriptViewModel(application: Application) : AndroidViewModel(applicati
     private var linesCollectJob: Job? = null
     private var foliosCollectJob: Job? = null
 
+    // Dipakai splash screen (lihat MainActivity) supaya splash tetap tampil sampai
+    // query pertama ke database benar-benar selesai — bukan cuma splash kosmetik
+    // yang hilang di waktu tetap tanpa peduli data sudah siap atau belum.
+    private val _isReady = MutableStateFlow(false)
+    val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+
     init {
+        // repository.allDocuments (Flow Room mentah, BUKAN allDocuments StateFlow di
+        // atas) sengaja dipakai di sini — StateFlow hasil .stateIn() sudah punya nilai
+        // awal (emptyList()) SEJAK SAAT DIBUAT, jadi .first() di situ akan langsung
+        // selesai tanpa benar-benar menunggu query database yang sesungguhnya.
+        viewModelScope.launch {
+            repository.allDocuments.first()
+            _isReady.value = true
+        }
+
         // Automatically select the first document when documents load
         viewModelScope.launch {
             allDocuments.collect { docs ->

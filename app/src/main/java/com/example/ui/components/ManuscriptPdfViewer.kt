@@ -150,7 +150,11 @@ fun ManuscriptPdfViewer(
     // dan panel foto ini tidak pernah membaca variabel itu. Kalau tetap dipanggil
     // lewat triggerEdgeScroll di sini, panel foto tidak akan pernah auto-center lagi
     // ke baris aktif — persis bug "area hitam besar, foto nyangkut di pojok".
-    LaunchedEffect(currentLineIndex, autoFollowTyping) {
+    // PENTING: `lines.isNotEmpty()` SENGAJA jadi key (bukan cuma currentLineIndex &
+    // autoFollowTyping) — data baris datang ASYNC lewat Flow Room, jadi tanpa key ini
+    // efek tidak pernah jalan ulang begitu data baris (yang tadinya kosong) akhirnya
+    // datang. Lihat penjelasan lebih lengkap di PdfTypewriterSheet.kt (bug yang sama).
+    LaunchedEffect(currentLineIndex, autoFollowTyping, lines.isNotEmpty()) {
         if (autoFollowTyping && lines.isNotEmpty()) {
             val safeIdx = currentLineIndex.coerceIn(0, lines.size - 1)
             val lineItem = lines[safeIdx]
@@ -251,7 +255,10 @@ fun ManuscriptPdfViewer(
                             )
                             
                             // User manual drag pauses auto follow
-                            if (pan.getDistance() > 12f) {
+                            // Ambang dinaikkan dari 12f -> 48f: 12px terlalu sensitif, sentuhan
+                            // kecil/tap tidak sengaja bisa mematikan auto-follow tanpa disadari
+                            // user, dan tidak ada indikasi jelas kenapa panel berhenti mengikuti.
+                            if (pan.getDistance() > 48f) {
                                 autoFollowTyping = false
                             }
                         }

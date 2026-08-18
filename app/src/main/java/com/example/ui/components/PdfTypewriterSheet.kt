@@ -172,7 +172,16 @@ fun PdfTypewriterSheet(
 
     // Auto Carriage Shift & Synchronized Edge Scrolling
     // When text grows or reaches near the screen edge, shift carriage and sync with top PDF viewer
-    LaunchedEffect(currentLineIndex, currentProgressFraction, autoCarriageShift, syncController.bottomZoomScale, syncController.isLinked) {
+    //
+    // PENTING: `lines.isNotEmpty()` SENGAJA ditambahkan sebagai key. Data baris datang
+    // ASYNC lewat Flow Room — saat komposisi pertama, `lines` masih kosong (Flow belum
+    // sempat emit), jadi kondisi `lines.isNotEmpty()` di bawah gagal dan efek ini skip.
+    // Begitu data baris beneran datang, currentLineIndex/autoCarriageShift TIDAK
+    // berubah nilainya (tetap 0/true dari awal) — tanpa key ini, Compose tidak akan
+    // pernah menjalankan ulang efeknya, dan pan/center jadi permanen macet di posisi
+    // default (0,0) alih-alih ke baris aktif. Ini bug yang bikin kertas nyangkut di
+    // pojok/area hitam besar, BUKAN soal rumus pan-nya yang salah.
+    LaunchedEffect(currentLineIndex, currentProgressFraction, autoCarriageShift, syncController.bottomZoomScale, syncController.isLinked, lines.isNotEmpty()) {
         if (autoCarriageShift && lines.isNotEmpty()) {
             val safeIdx = currentLineIndex.coerceIn(0, lines.size - 1)
             val lineItem = lines[safeIdx]
@@ -294,7 +303,8 @@ fun PdfTypewriterSheet(
                                 contentHeight = sheetH
                             )
                             
-                            if (pan.getDistance() > 12f) {
+                            // Ambang dinaikkan dari 12f -> 48f, sama seperti panel foto.
+                            if (pan.getDistance() > 48f) {
                                 autoCarriageShift = false
                             }
                         }
